@@ -26,6 +26,7 @@ jobs:
         run: ./gradlew test
 
   security-check:
+    name: Security - Dependency Scan
     runs-on: ubuntu-latest
     needs: test
     steps:
@@ -34,19 +35,21 @@ jobs:
         uses: actions/dependency-review-action@v4
 
   secret-scan:
+    name: Security - Secret Scan
     runs-on: ubuntu-latest
     needs: test
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - name: Install Gitleaks
+        uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run Gitleaks
+        run: ./gitleaks detect --source . --exit-code 1
 
   deploy-test:
     name: Deploy TEST (Pull Request)
-    needs: test
+    needs: [test, security-check, secret-scan]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -56,7 +59,7 @@ jobs:
 
   deploy-dev:
     name: Deploy DEV (On push on develop branch)
-    needs: test
+    needs: [test, security-check, secret-scan]
     if: github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     steps:
@@ -66,7 +69,7 @@ jobs:
 
   deploy-prod:
     name: Deploy PROD (On push on main branch)
-    needs: test
+    needs: [test, security-check, secret-scan]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:

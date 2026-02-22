@@ -22,9 +22,6 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-
-	// Intentionally vulnerable dependency for testing scanners (DO NOT SHIP)
-	testImplementation 'org.apache.logging.log4j:log4j-core:2.14.1'
 }
 
 tasks.named('test') {

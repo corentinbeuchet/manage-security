@@ -1,293 +1,173 @@
-# 🧪 Exercice 4 – Gestion des configurations et des environnements avec Ansible & GitHub Actions
+# 🔐 Exercice complémentaire -- Ajout de la Sécurité (DevSecOps)
 
-## 📚 Contexte
-Cet exercice fait suite aux exercices précédents :
-- Exercice 2 : Pipeline CI/CD
-- Exercice 3 : Intégration de tests automatisés
+------------------------------------------------------------------------
 
-Le projet dispose désormais :
-- d’un pipeline CI/CD GitHub Actions fonctionnel
-- de tests automatisés
-- d’une branche `main` protégée
+## 📌 Contexte
 
-L’objectif de cet exercice est d’introduire **Ansible** pour automatiser la configuration et le déploiement, en gérant **plusieurs environnements**.
+Vous avez terminé l'exercice précédent :
 
+-   ✅ Pipeline CI/CD fonctionnelle\
+-   ✅ Tests automatisés\
+-   ✅ Déploiement multi-environnements avec Ansible\
+-   ✅ Protection des branches `main` et `develop`
 
----
+Votre pipeline permet maintenant :
 
-## 🧩 Partie 0 – Installation d’Ansible
+Tests → Déploiement DEV / TEST / PROD
 
-Avant de commencer l’exercice, assurez-vous qu’Ansible est installé sur votre machine ou sur l’environnement CI.
+Nous allons maintenant la transformer en **pipeline DevSecOps** en y
+intégrant des contrôles de sécurité automatisés.
 
-### 🔹 Installation sur Linux (Ubuntu / Debian)
-```bash
-sudo apt update
-sudo apt install -y ansible
+------------------------------------------------------------------------
+
+# 🎯 Objectif de cet exercice
+
+Ajouter des **contrôles de sécurité obligatoires** dans votre pipeline
+avant tout déploiement.
+
+Pipeline attendue :
+
+Tests ↓ Scan des dépendances ↓ Scan des secrets ↓ Déploiement DEV / TEST
+↓ Déploiement PROD (si tout est conforme)
+
+------------------------------------------------------------------------
+
+# 🧩 Partie 1 -- Ajouter un scan des dépendances (SCA)
+
+## 🎯 Pourquoi ?
+
+Certaines dépendances peuvent contenir des vulnérabilités connues
+(CVE).\
+Nous devons empêcher leur déploiement en production.
+
+## 🔧 Étape à réaliser
+
+Dans votre fichier :
+
+.github/workflows/ci-cd.yml
+
+Ajouter un nouveau job nommé `security-check` :
+
+``` yaml
+security-check:
+  name: Security - Dependency Scan
+  runs-on: ubuntu-latest
+  needs: test
+  steps:
+    - uses: actions/checkout@v4
+    - name: Dependency Review
+      uses: actions/dependency-review-action@v4
 ```
 
-### 🔹 Installation sur macOS (Homebrew)
-```bash
-brew install ansible
+------------------------------------------------------------------------
+
+# 🧩 Partie 2 -- Ajouter un scan de secrets
+
+## 🎯 Pourquoi ?
+
+Un développeur peut accidentellement commiter :
+
+-   mot de passe
+-   clé API
+-   token
+-   clé privée
+
+Cela doit bloquer immédiatement la pipeline.
+
+## 🔧 Étape à réaliser
+
+Ajouter un second job `secret-scan` :
+
+``` yaml
+secret-scan:
+  name: Security - Secret Scan
+  runs-on: ubuntu-latest
+  needs: test
+  steps:
+    - uses: actions/checkout@v4
+    - name: Install Gitleaks
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Run Gitleaks
+      run: ./gitleaks detect --source . --exit-code 1
 ```
 
-### 🔹 Installation windows
-```bash
-wsl --install
-```
-Redémarrer si Ubuntu ne se lance pas
-Ouvre le menu Démarrer → cherche “Ubuntu” → lance-le
-(ou bien dans PowerShell :)
-```bash
-wsl -d Ubuntu
-sudo apt update
-sudo apt install -y ansible
-```
+------------------------------------------------------------------------
 
-### 🔹 Vérification de l’installation
-```bash
-ansible --version
-ansible-playbook --version
-```
+# 🧩 Partie 3 -- Rendre la production dépendante de la sécurité
 
-Vous devez voir s’afficher la version d’Ansible installée.
+Modifier le job `deploy-prod` pour qu'il dépende aussi des contrôles
+sécurité.
 
----
----
+Remplacer :
 
-## 🎯 Objectifs pédagogiques
-À l’issue de cet exercice, vous serez capable de :
-- Comprendre l’intérêt de la gestion de configuration en CI/CD
-- Utiliser Ansible dans un pipeline GitHub Actions
-- Gérer plusieurs environnements (dev / test / prod)
-- Séparer le code applicatif de la configuration
-- Déployer automatiquement après les tests
+needs: test
 
----
+Par :
 
-## 🧩 Partie 1 – Concepts de gestion de configuration
+needs: \[test, security-check, secret-scan\]
 
-### Problématique
-Sans gestion de configuration :
-- Déploiements manuels
-- Incohérences entre environnements
-- Risque d’erreurs élevé
+Faire la même modification pour `deploy-dev` et `deploy-test`.
 
-### Principe clé
-- Même code pour tous les environnements
-- Configuration différente selon l’environnement
-- Infrastructure as Code (IaC)
+------------------------------------------------------------------------
 
----
+# 🧪 Partie 4 -- Tests pédagogiques obligatoires
 
-## 🧩 Partie 2 – Mise en place d’Ansible
+## 1️⃣ Simuler un secret exposé
 
-### Structure attendue
-```
-ansible/
-├── inventory/
-│   ├── dev.ini
-│   ├── test.ini
-│   └── prod.ini
-├── group_vars/
-│   ├── dev.yml
-│   ├── test.yml
-│   └── prod.yml
-└── playbook.yml
-```
+Ajouter volontairement dans un fichier :
 
----
+password=SuperSecret123
 
-## 🧩 Partie 3 – Gestion des environnements
+Commit → Push
 
-### Inventaires
+Résultat attendu :\
+❌ Le job `secret-scan` échoue\
+❌ Aucun déploiement n'a lieu
 
-**dev.ini**
-```ini
-[dev]
-localhost ansible_connection=local
-```
+Supprimer le secret → nouveau commit → succès attendu.
 
-**test.ini**
-```ini
-[test]
-localhost ansible_connection=local
-```
+------------------------------------------------------------------------
 
-**prod.ini**
-```ini
-[prod]
-localhost ansible_connection=local
-```
+## 2️⃣ Simuler une dépendance vulnérable
 
-### Variables par environnement
+Ajouter volontairement une dépendance connue vulnérable dans
+`build.gradle`.
 
-**dev.yml**
-```yaml
-env_name: development
-app_port: 8080
-debug_mode: true
-maintenance_mode: false
-```
+Résultat attendu :\
+❌ Le job `security-check` échoue\
+❌ Aucun déploiement n'a lieu
 
-**test.yml**
-```yaml
-env_name: testing
-app_port: 8081
-debug_mode: false
-maintenance_mode: false
-```
+Corriger la dépendance → succès attendu.
 
-**prod.yml**
-```yaml
-env_name: production
-app_port: 80
-debug_mode: false
-maintenance_mode: true
-```
+------------------------------------------------------------------------
 
----
+# 🧠 Questions de réflexion
 
-## 🧩 Partie 4 – Playbook Ansible
+1.  Pourquoi la sécurité doit-elle être automatisée ?
+2.  Quelle différence entre DevOps et DevSecOps ?
+3.  Pourquoi ne jamais ignorer un scan de sécurité ?
+4.  Pourquoi la production ne doit jamais contourner ces contrôles ?
+5.  Que se passerait-il si un secret arrivait en production ?
 
-```yaml
-- name: Deploy application
-  hosts: all
-  gather_facts: false
+------------------------------------------------------------------------
 
-  tasks:
-    - name: Display environment name
-      debug:
-        msg: "Environment: {{ env_name }}"
+# ✅ Conclusion
 
-    - name: Display application port
-      debug:
-        msg: "Application will run on port {{ app_port }}"
+Avec cet ajout, votre projet passe de :
 
-    - name: Display debug mode
-      debug:
-        msg: "Debug mode enabled: {{ debug_mode }}"
+CI/CD
 
-    - name: Simulate deployment
-      shell: |
-        echo "Deploying application..."
-        echo "Environment={{ env_name }}"
-        echo "Port={{ app_port }}"
+À :
 
-    - name: Prevent deployment if maintenance mode is enabled
-      fail:
-        msg: "Deployment blocked: maintenance mode enabled"
-      when: maintenance_mode | default(false)
-```
+CI/CD + Sécurité intégrée = DevSecOps
 
----
+Vous avez maintenant :
 
-## 🧩 Partie 5 – Exécution locale
-
-```bash
-ansible-playbook -i ansible/inventory/dev.ini ansible/playbook.yml
-ansible-playbook -i ansible/inventory/test.ini ansible/playbook.yml
-ansible-playbook -i ansible/inventory/prod.ini ansible/playbook.yml
-```
-
----
-
-## 🧩 Partie 6 – Intégration CI/CD avec GitHub Actions
-
-### Objectif
-Automatiser le déploiement après les tests.
-
-### Fichier `.github/workflows/ci.yml` renommé en `.github/workflows/ci-cd.yml`
-
-```yaml
-name: CI/CD with Ansible
-
-on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-
-# Prevent multiple runs piling up for the same branch/PR
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  test:
-    name: Run tests (Pull Request)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '25'
-      - name: Grant execute permission for Gradle wrapper
-        run: chmod +x ./gradlew
-      - name: Lancer les tests
-        run: ./gradlew test
-
-  deploy-test:
-    name: Deploy TEST (Pull Request)
-    needs: test
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt update && sudo apt install -y ansible
-      - run: ansible-playbook -i ansible/inventory/test.ini ansible/playbook.yml
-
-  deploy-dev:
-    name: Deploy DEV (On push on develop branch)
-    needs: test
-    if: github.ref == 'refs/heads/develop'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt update && sudo apt install -y ansible
-      - run: ansible-playbook -i ansible/inventory/dev.ini ansible/playbook.yml
-
-  deploy-prod:
-    name: Deploy PROD (On push on main branch)
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt update && sudo apt install -y ansible
-      - run: ansible-playbook -i ansible/inventory/prod.ini ansible/playbook.yml
-```
-
----
-
-## 🧪 Partie 7 – Exercice pédagogique (OBLIGATOIRE)
-
-### Objectif
-Mettre en place un déploiement sécurisé en production.
-
-### Travail demandé
-1. Toute **Pull Request** déclenche un déploiement en **TEST**
-2. Un push sur `develop` déclenche un déploiement en **DEV**
-3. Un push sur `main` déclenche un déploiement en **PROD**
-4. Constater l’échec volontaire du déploiement PROD
-5. Désactiver temporairement `maintenance_mode` pour autoriser PROD
-6. Justifier cette modification
-7. Rajouter les règles pour protéger le merge sur `main` et `develop`
-
-### Résultats attendus
-- DEV : déploiement réussi
-- PROD : déploiement bloqué par défaut
-- PROD autorisé uniquement après modification consciente
-
----
-
-## ❓ Questions de réflexion
-1. Pourquoi séparer code et configuration ?
-2. Pourquoi utiliser plusieurs environnements ?
-3. Pourquoi bloquer la production par défaut ?
-4. Peut-on utiliser un seul playbook pour tous les environnements ?
-5. Quels risques en cas de déploiement manuel ?
-
----
-
-## 🏁 Conclusion
-Cet exercice reproduit un scénario CI/CD réel avec Ansible.
+-   Tests automatisés
+-   Déploiements multi-environnements
+-   Infrastructure as Code
+-   Scan des dépendances
+-   Détection de secrets
+-   Blocage automatique de la production
