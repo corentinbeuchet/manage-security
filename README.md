@@ -85,12 +85,12 @@ secret-scan:
   needs: test
   steps:
     - uses: actions/checkout@v4
-    - name: Install Gitleaks
+      with:
+        fetch-depth: 0
+    - name: Run Gitleaks
       uses: gitleaks/gitleaks-action@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    - name: Run Gitleaks
-      run: ./gitleaks detect --source . --exit-code 1
 ```
 
 ------------------------------------------------------------------------
@@ -102,11 +102,15 @@ sécurité.
 
 Remplacer :
 
+```yaml
 needs: test
+```
 
 Par :
 
-needs: \[test, security-check, secret-scan\]
+```yaml
+needs: [test, security-check, secret-scan]
+```
 
 Faire la même modification pour `deploy-dev` et `deploy-test`.
 
@@ -116,15 +120,21 @@ Faire la même modification pour `deploy-dev` et `deploy-test`.
 
 ## 1️⃣ Simuler un secret exposé
 
-Ajouter volontairement dans un fichier :
+Ajouter volontairement dans un fichier `[application-dev.yml](src/main/resources/application-dev.yml)`:
 
-password=SuperSecret123
+``` yaml
+database:
+  url: jdbc:mysql://localhost:3306/app
+  username: admin
+  password: ghp_0123456789abcdefghijklmnopqrstuvwxyzABCD
+```
 
 Commit → Push
 
 Résultat attendu :\
-❌ Le job `secret-scan` échoue\
-❌ Aucun déploiement n'a lieu
+❌ Le job `secret-scan` échoue; Le message d'erreur est : `Dependency review is not supported on this repository. Please ensure that Dependency graph is enabled` => trouvez un moyen de l'activer puis relancer la pipeline\
+❌ Le job `secret-scan` échoue, un mot de passe est détecté (des fois, il n'est pas détecté par gitleaks car on ne l'a pas configuré dans ce TP, en situation réelle, des outils plus performats, et des configurations customisées par la Cyber sont utilisés)\
+❌ Aucun déploiement n'a lieu (sauf si non détecté comme vu au dessus)
 
 Supprimer le secret → nouveau commit → succès attendu.
 
@@ -134,10 +144,14 @@ Supprimer le secret → nouveau commit → succès attendu.
 
 Ajouter volontairement une dépendance connue vulnérable dans
 `build.gradle`.
+Par exemple :
+```groovy
+implementation("org.apache.logging.log4j:log4j-core:2.14.1") 
+```
 
 Résultat attendu :\
 ❌ Le job `security-check` échoue\
-❌ Aucun déploiement n'a lieu
+❌ Aucun déploiement n'a lieu (attention, il fait un diff avec le dernier Hash, il ne le détectera pas de nouveau si on push une nouvelle fois sur le Commit, comme pour au dessus, des configurations plus précises, sont utilisées en situation réelle)
 
 Corriger la dépendance → succès attendu.
 
