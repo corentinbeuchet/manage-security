@@ -85,10 +85,51 @@ jobs:
           docker logs demo
           exit 1
 
+  # ---------- Sécurité (exercice 5) ----------
+  dependency-submission:
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write        # nécessaire pour envoyer le graphe à GitHub
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+      - name: Envoyer le graphe des dépendances
+        uses: gradle/actions/dependency-submission@v6
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    needs: dependency-submission
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v5
+        with:
+          retry-on-snapshot-warnings: true
+          retry-on-snapshot-warnings-timeout: 600   # attendre (10 min max) que le graphe soit envoyé
+
+  secret-scan:
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      pull-requests: write   # Gitleaks commente la PR quand il trouve un secret
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0     # tout l'historique, pas seulement le dernier commit
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # ---------- Déploiements ----------
   deploy-test:
     name: Deploy TEST (Pull Request)
-    needs: docker
+    needs: [docker, dependency-review, secret-scan]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-26.04
     steps:
@@ -97,7 +138,7 @@ jobs:
 
   deploy-dev:
     name: Deploy DEV (push sur develop)
-    needs: docker
+    needs: [docker, secret-scan]
     if: github.ref == 'refs/heads/develop'
     runs-on: ubuntu-26.04
     steps:
@@ -106,7 +147,7 @@ jobs:
 
   deploy-prod:
     name: Deploy PROD (push sur main)
-    needs: docker
+    needs: [docker, secret-scan]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     steps:
