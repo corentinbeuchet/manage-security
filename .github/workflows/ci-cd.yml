@@ -110,7 +110,7 @@ jobs:
         uses: actions/dependency-review-action@v5
         with:
           retry-on-snapshot-warnings: true
-          retry-on-snapshot-warnings-timeout: 600   # attendre (10 min max) que le graphe soit envoyé
+          retry-on-snapshot-warnings-timeout: 60   # attendre (1 min max) que le graphe de la branche cible soit disponible
 
   secret-scan:
     runs-on: ubuntu-26.04

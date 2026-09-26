@@ -1,0 +1,4 @@
+database:
+  url: jdbc:mysql://localhost:3306/app
+  username: admin
+  password: ghp_0123456789abcdefghijklmnopqrstuvwxyzABCD
