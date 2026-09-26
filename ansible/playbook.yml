@@ -1,0 +1,22 @@
+- name: Deploy application
+  hosts: all
+  gather_facts: false
+
+  vars:
+    image_tag: local   # remplacé par la CI (-e image_tag=...)
+
+  tasks:
+    - name: Refuser le déploiement si l'environnement est en maintenance
+      ansible.builtin.fail:
+        msg: "Deployment blocked: maintenance mode enabled on {{ env_name }}"
+      when: maintenance_mode | default(false)
+
+    - name: Afficher la configuration
+      ansible.builtin.debug:
+        msg: "Env={{ env_name }} | port={{ app_port }} | debug={{ debug_mode }}"
+
+    - name: Simuler le déploiement de l'image
+      ansible.builtin.shell: |
+        echo "Deploying image demo:{{ image_tag }}"
+        echo "Environment={{ env_name }}"
+        echo "Port={{ app_port }}"

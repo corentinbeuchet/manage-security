@@ -1,0 +1,7 @@
+# Le README de l'exercice contient volontairement un faux token (partie 4) : on ne scanne pas ce fichier.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Faux token pédagogique du README de l'exercice"
+paths = ['''^README\.md$''']

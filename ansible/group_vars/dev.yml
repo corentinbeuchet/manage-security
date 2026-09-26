@@ -1,0 +1,4 @@
+env_name: development
+app_port: 8080
+debug_mode: true
+maintenance_mode: false

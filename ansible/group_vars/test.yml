@@ -1,0 +1,4 @@
+env_name: testing
+app_port: 8081
+debug_mode: false
+maintenance_mode: false

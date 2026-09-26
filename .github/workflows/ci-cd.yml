@@ -1,0 +1,117 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+
+# Évite d'empiler plusieurs runs pour la même branche / PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------- CI : exercice 3 ----------
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+      - name: Construire et vérifier
+        run: ./gradlew build
+      - name: Publier le livrable
+        uses: actions/upload-artifact@v7
+        with:
+          name: app
+          path: build/libs/app.jar
+      - name: Publier les rapports (même en cas d'échec)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rapports
+          path: build/reports/
+
+  performance:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+      - name: Récupérer le livrable construit par le job build
+        uses: actions/download-artifact@v8
+        with:
+          name: app
+          path: build/libs
+      - name: Démarrer l'application
+        run: |
+          java -jar build/libs/app.jar &
+          for i in $(seq 1 30); do
+            curl -fs http://localhost:8080/hello && exit 0
+            sleep 2
+          done
+          echo "L'application n'a pas démarré" && exit 1
+      - uses: grafana/setup-k6-action@v1
+      - uses: grafana/run-k6-action@v1
+        with:
+          path: perf/hello.js
+
+  # ---------- Livraison : image Docker ----------
+  docker:
+    needs: [build, performance]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Récupérer le livrable testé
+        uses: actions/download-artifact@v8
+        with:
+          name: app
+          path: build/libs
+      - name: Construire l'image
+        run: docker build -t demo:${{ github.sha }} .
+      - name: Lancer le conteneur
+        run: docker run -d --name demo -p 8080:8080 demo:${{ github.sha }}
+      - name: Test de fumée
+        run: |
+          for i in $(seq 1 30); do
+            curl -fs http://localhost:8080/hello && exit 0
+            sleep 2
+          done
+          docker logs demo
+          exit 1
+
+  # ---------- Déploiements ----------
+  deploy-test:
+    name: Deploy TEST (Pull Request)
+    needs: docker
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: pipx install --force ansible-core
+      - run: ansible-playbook -i ansible/inventory/test.ini ansible/playbook.yml -e image_tag=${{ github.sha }}
+
+  deploy-dev:
+    name: Deploy DEV (push sur develop)
+    needs: docker
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: pipx install --force ansible-core
+      - run: ansible-playbook -i ansible/inventory/dev.ini ansible/playbook.yml -e image_tag=${{ github.sha }}
+
+  deploy-prod:
+    name: Deploy PROD (push sur main)
+    needs: docker
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: pipx install --force ansible-core
+      - run: ansible-playbook -i ansible/inventory/prod.ini ansible/playbook.yml -e image_tag=${{ github.sha }}

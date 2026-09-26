@@ -1,0 +1,4 @@
+env_name: production
+app_port: 80
+debug_mode: false
+maintenance_mode: false
