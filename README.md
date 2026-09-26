@@ -59,7 +59,7 @@ Votre application embarque des dizaines de bibliothèques. Certaines versions on
 
 ```yaml
   dependency-submission:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write        # nécessaire pour envoyer le graphe à GitHub
     steps:
@@ -74,7 +74,7 @@ Votre application embarque des dizaines de bibliothèques. Certaines versions on
   dependency-review:
     if: github.event_name == 'pull_request'
     needs: dependency-submission
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:
@@ -101,7 +101,7 @@ Un développeur peut, par erreur, committer un mot de passe, une clé d'API, un 
 
 ```yaml
   secret-scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       pull-requests: write   # Gitleaks commente la PR quand il trouve un secret
