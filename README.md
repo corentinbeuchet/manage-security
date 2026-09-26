@@ -55,7 +55,12 @@ Votre application embarque des dizaines de bibliothèques. Certaines versions on
 1. GitHub doit connaître la liste de vos dépendances (le **dependency graph**). Pour Gradle, il ne sait pas la lire tout seul : c'est l'action `gradle/actions/dependency-submission` qui la calcule et la lui envoie.
 2. `dependency-review-action` compare ensuite les dépendances de la PR à celles de la branche cible, et échoue si la PR ajoute une dépendance vulnérable.
 
-### 🔧 Ajouter deux jobs dans `.github/workflows/ci-cd.yml`
+### 🔧 Activer le dependency graph
+Il est **désactivé** sur un nouveau dépôt. Dans **Settings → Advanced Security**, ligne **Dependency graph**, cliquez **Enable**.
+Sans cela, le job `dependency-submission` échoue avec : `The Dependency graph is disabled for this repository`.
+
+### 🔧 Étape 1 : envoyer le graphe (PR n°1)
+Ajoutez ce job dans `.github/workflows/ci-cd.yml` :
 
 ```yaml
   dependency-submission:
@@ -70,7 +75,16 @@ Votre application embarque des dizaines de bibliothèques. Certaines versions on
           java-version: '25'
       - name: Envoyer le graphe des dépendances
         uses: gradle/actions/dependency-submission@v6
+```
 
+PR vers `develop`, CI verte, **merge**. Le push sur `develop` envoie le graphe de référence : c'est lui qui servira de point de comparaison.
+
+> Vous pouvez le consulter dans l'onglet **Insights → Dependency graph** du dépôt.
+
+### 🔧 Étape 2 : comparer (PR n°2)
+Sur une nouvelle branche, ajoutez le second job :
+
+```yaml
   dependency-review:
     if: github.event_name == 'pull_request'
     needs: dependency-submission
@@ -82,13 +96,16 @@ Votre application embarque des dizaines de bibliothèques. Certaines versions on
         uses: actions/dependency-review-action@v5
         with:
           retry-on-snapshot-warnings: true
-          retry-on-snapshot-warnings-timeout: 600   # attendre (10 min max) que le graphe soit envoyé
+          retry-on-snapshot-warnings-timeout: 60   # attendre (1 min max) que le graphe de la branche cible soit disponible
 ```
 
+PR vers `develop`, CI verte, merge.
+
 📌 À comprendre :
-- `dependency-submission` tourne **à chaque push et chaque PR** : GitHub garde ainsi à jour le graphe de `main` et `develop`, qui sert de référence.
-- `dependency-review` ne tourne **que sur les PR** : il a besoin de deux versions à comparer (la branche cible et la PR). Sur un simple push, il échouerait.
-- Sur la **première** PR, `develop` n'a pas encore de graphe envoyé : le job peut attendre plusieurs minutes, voire signaler toutes les dépendances comme nouvelles. Après le merge (push sur `develop`), la référence existe et les PR suivantes ne montrent que les vraies différences.
+- `dependency-submission` tourne **à chaque push et chaque PR** : GitHub garde ainsi à jour le graphe de `main` et `develop`.
+- `dependency-review` ne tourne **que sur les PR** : il compare la PR à la branche cible. Sur un simple push, il n'y a rien à comparer.
+- `needs: dependency-submission` garantit que le graphe de la PR est envoyé **avant** la comparaison.
+- Le scan ne signale que ce que la PR **ajoute ou modifie**. C'est pour cela qu'on envoie d'abord le graphe de référence (étape 1) : sans lui (message `The number of snapshots compared for the base SHA (0)…`), toutes les dépendances sont vues comme nouvelles, et la moindre vulnérabilité déjà présente bloque la PR.
 
 ---
 
@@ -216,7 +233,7 @@ Un déploiement réel a besoin d'identifiants (registre Docker, serveur, cloud�
 ## 🧩 Partie 6 – Analyse du code et mises à jour automatiques
 
 ### CodeQL : les failles dans **votre** code (SAST)
-Dans **Settings → Advanced Security** (ou **Code security** selon l'interface), section **Code scanning → CodeQL analysis**, cliquez **Set up → Default**, puis **Enable CodeQL**.
+Dans **Settings → Advanced Security**, section **Code scanning → CodeQL analysis**, cliquez **Set up → Default**, puis **Enable CodeQL**.
 Aucun fichier à écrire : GitHub analyse le code à chaque PR et chaque push. Les résultats sont dans l'onglet **Security → Code scanning**.
 
 ### Dependabot : rester à jour sans y penser
@@ -244,6 +261,8 @@ updates:
 
 Dans **Settings → Advanced Security**, activez aussi **Dependabot alerts** et **Dependabot security updates**.
 Dependabot ouvrira des PR de mise à jour : elles passeront par **tout** votre pipeline avant d'être mergées.
+
+> 💡 L'onglet **Security → Dependabot** signalera sans doute des vulnérabilités dans des bibliothèques que vous n'avez jamais ajoutées vous-même (Tomcat, par exemple) : elles viennent de Spring Boot. La correction passe par une version plus récente de Spring Boot, que Dependabot vous proposera dans une PR.
 
 📌 Les versions des actions (`checkout@v7`…) vieillissent aussi : GitHub retire régulièrement les anciennes versions de Node.js de ses runners, et les actions trop anciennes cessent de fonctionner. Dependabot vous prévient.
 
