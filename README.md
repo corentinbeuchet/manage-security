@@ -1,5 +1,7 @@
 # 🔐 Exercice 5 – Intégrer la sécurité au pipeline (DevSecOps) et le documenter
 
+> 🎯 **Priorités** : les parties 1, 2, 2 bis, 3, 5, 6 (CodeQL) et 7 sont l'essentiel, ce que vous devrez savoir refaire seul à l'évaluation finale. La partie 4 et Dependabot (partie 6) sont pour aller plus loin, si le temps le permet.
+
 ## 📌 Contexte
 Vous avez terminé l'exercice 4 :
 - ✅ Pipeline CI/CD : build, tests, qualité, livrable
@@ -12,8 +14,8 @@ Votre pipeline vérifie que le code **fonctionne**. Il ne vérifie pas encore qu
 Pipeline visé :
 
 ```
-Pull Request : (build → docker) + scan des dépendances + scan des secrets → déploiement TEST
-Push develop / main : (build → docker) + scan des secrets → déploiement DEV / PROD
+Pull Request : (build → docker + scan de l'image + scan de l'appli) + scan des dépendances + scan des secrets → déploiement TEST
+Push develop / main : (build → docker + scan de l'image + scan de l'appli) + scan des secrets → déploiement DEV / PROD
 ```
 
 ---
@@ -21,7 +23,7 @@ Push develop / main : (build → docker) + scan des secrets → déploiement DEV
 ## 🎯 Ce que vous devez comprendre et savoir faire
 À la fin de cet exercice, vous devez être capable de :
 - **Expliquer « shift left »** : trouver un problème de sécurité dans une PR coûte bien moins cher qu'en production.
-- **Distinguer les familles de contrôles** : dépendances vulnérables (SCA), secrets exposés, failles dans votre propre code (SAST).
+- **Distinguer les familles de contrôles** : dépendances vulnérables (SCA), secrets exposés, failles dans votre propre code (SAST), image Docker vulnérable, application mal configurée une fois lancée (DAST).
 - **Réagir à une alerte** : lire le rapport, comprendre le risque, corriger la cause (et pas désactiver le contrôle).
 - **Expliquer pourquoi un secret poussé une fois est compromis**, même si on le supprime au commit suivant.
 - **Utiliser un secret dans un pipeline sans l'écrire dans le code** (GitHub Secrets).
@@ -69,7 +71,7 @@ Ajoutez ce job dans `.github/workflows/ci-cd.yml` :
       contents: write        # nécessaire pour envoyer le graphe à GitHub
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
           java-version: '25'
@@ -136,9 +138,73 @@ Un développeur peut, par erreur, committer un mot de passe, une clé d'API, un 
 
 ---
 
+## 🧩 Partie 2 bis – Scanner l'image et l'application en marche
+
+### 🎯 Pourquoi ?
+Le scan des dépendances ne regarde que `build.gradle`. Or ce qui part en production, c'est **l'image Docker** : un système (paquets Linux), un JRE, et votre jar. Une faille peut se cacher dans chacun.
+Et certains problèmes n'apparaissent que **quand l'application tourne** : en-têtes de sécurité absents, informations qui fuient dans les réponses, mauvaise configuration.
+
+| Contrôle | Ce qu'il regarde | Outil |
+|---|---|---|
+| Scan de l'image | Paquets du système, JRE, bibliothèques du jar | Trivy |
+| Scan dynamique (DAST) | L'application lancée, vue de l'extérieur | ZAP (baseline) |
+
+### 🔧 Ajouter deux étapes à la fin du job `docker`
+L'image vient d'être construite et le conteneur tourne : c'est le bon endroit.
+
+```yaml
+      # ----- Exercice 5 : scanner l'image, puis l'application en marche -----
+      - name: Scanner l'image (Trivy)
+        # Épinglé par SHA : les tags de trivy-action ont été détournés en mars 2026
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: demo:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true     # ne bloque que si un correctif existe
+          exit-code: '1'           # une faille HIGH ou CRITICAL fait échouer le job
+      - name: Scanner l'application en marche (ZAP baseline)
+        uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
+        with:
+          target: http://localhost:8080/hello
+          allow_issue_writing: false   # rapport en artefact, pas d'issue GitHub
+```
+
+📌 Pourquoi un SHA et pas `@v0.36.0` ? Un tag peut être déplacé vers un autre code : c'est exactement ce qui est arrivé à `trivy-action` en mars 2026. Un SHA de commit ne bouge jamais. Le commentaire `# v0.36.0` reste lisible pour vous, et Dependabot (si vous l'activez pour `github-actions`, partie 6) met à jour les deux.
+
+### 🔍 Lire les résultats
+- **Trivy** : le tableau est dans le log de l'étape (bibliothèque, CVE, gravité, version installée, version corrigée).
+- **ZAP** : téléchargez l'artefact `zap_scan` en bas de la page du run et ouvrez `report_html.html`. Le baseline ne fait **pas** échouer le job par défaut : il vous montre des alertes (niveau *WARN* : quelques en-têtes de sécurité manquants sur une API Spring Boot par défaut), à vous de décider.
+
+### 🚦 Si Trivy bloque
+Attendez-vous à un premier passage **rouge** : fin septembre 2026, Trivy trouvait des failles corrigées mais pas encore livrées par Spring Boot (Tomcat embarqué, Jackson) et par l'image de base (OpenSSL). C'est le cœur de l'exercice : lire, décider, corriger.
+
+1. Lisez le tableau : quelle bibliothèque, quelle version corrige (colonne *Fixed Version*) ?
+2. **Une bibliothèque du jar** gérée par Spring Boot : forcez la version corrigée dans `build.gradle`, avec un commentaire qui dit quand l'enlever :
+   ```groovy
+   // Correctifs signalés par Trivy, pas encore livrés par Spring Boot : à retirer dès qu'il les embarque
+   ext['tomcat.version'] = '11.0.25'
+   ext['jackson-bom.version'] = '3.1.6'
+   ```
+   (le nom de la propriété se trouve dans la documentation de Spring Boot, *Dependency Versions → Version Properties* ; les numéros sont ceux que Trivy vous donne)
+3. **Un paquet du système** de l'image de base : appliquez les mises à jour de sécurité dans le `Dockerfile`, juste après `WORKDIR` :
+   ```dockerfile
+   RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+   ```
+4. Si aucune version corrigée n'existe encore par ces chemins, vous pouvez **accepter le risque, par écrit** : créez un fichier `.trivyignore` à la racine, avec l'identifiant et une justification :
+   ```
+   # <bibliothèque> : pas de correctif disponible au JJ/MM/AAAA (revoir le JJ/MM/AAAA)
+   CVE-AAAA-NNNNN
+   ```
+   et ajoutez `trivyignores: .trivyignore` dans le `with:` de l'étape Trivy. Une exception non justifiée, sans date de revue, c'est désactiver le contrôle.
+
+### 🔧 Et pour ZAP ?
+Dans le rapport, choisissez **une** alerte (par exemple un en-tête de sécurité manquant) et expliquez dans la PR : ce qu'elle signifie, si elle est pertinente pour une API, et comment vous la corrigeriez. Pas besoin de tout corriger : il faut savoir **lire** et **décider**.
+
+---
+
 ## 🧩 Partie 3 – Aucun déploiement sans sécurité
 
-Modifiez les `needs` des jobs de déploiement :
+Les scans de l'image et de l'application sont dans le job `docker`, dont dépendent déjà les déploiements. Modifiez les `needs` des jobs de déploiement pour les deux autres scans :
 
 ```yaml
   deploy-test:
@@ -290,7 +356,7 @@ Un pipeline que seul son auteur comprend est un risque. Dans le `README.md` de v
    ````
    Complétez-le avec les chemins `develop → DEV` et `main → PROD`.
 3. **Une section « Comment ça marche »** : ce que fait chaque job, ce qui déclenche chaque déploiement, et quels checks sont obligatoires sur `main` et `develop`.
-4. **Une section « Que faire si… »** : le build échoue, Checkstyle échoue, un secret est détecté, une dépendance est vulnérable, la prod est en maintenance. Pour chaque cas : où lire l'erreur, et comment corriger.
+4. **Une section « Que faire si… »** : le build échoue, Checkstyle échoue, un secret est détecté, une dépendance est vulnérable, Trivy bloque sur l'image, la prod est en maintenance. Pour chaque cas : où lire l'erreur, et comment corriger.
 
 Faites relire ce README par un camarade qui ne connaît pas votre dépôt : s'il comprend comment déployer et quoi faire quand ça échoue, votre documentation est bonne.
 
@@ -299,7 +365,7 @@ Faites relire ce README par un camarade qui ne connaît pas votre dépôt : s'il
 ## 🧠 Questions de réflexion
 1. Pourquoi la sécurité doit-elle être automatisée, et intégrée **tôt** dans le pipeline ?
 2. Quelle différence entre DevOps et DevSecOps ?
-3. Quelle différence entre le scan des dépendances, le scan des secrets et CodeQL ? Donnez un exemple de problème que seul chacun d'eux détecte.
+3. Quelle différence entre le scan des dépendances, le scan des secrets, CodeQL, Trivy et ZAP ? Donnez un exemple de problème que seul chacun d'eux détecte.
 4. Pourquoi supprimer un secret dans un nouveau commit ne suffit-il pas ?
 5. Pourquoi la production ne doit-elle jamais contourner ces contrôles ?
 6. Un scan vert signifie-t-il que l'application est sûre ?
@@ -315,7 +381,7 @@ Vous avez maintenant :
 - des tests automatisés, un contrôle qualité et un test de performance
 - un livrable unique, conteneurisé, promu de TEST à PROD
 - de l'Infrastructure as Code (Ansible)
-- des scans de dépendances, de secrets et de code
+- des scans de dépendances, de secrets, de code, de l'image et de l'application en marche
 - des secrets gérés hors du code
 - des mises à jour automatiques
 - un pipeline documenté, compréhensible par quelqu'un d'autre que vous
