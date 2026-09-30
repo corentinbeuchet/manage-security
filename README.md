@@ -69,7 +69,7 @@ Ajoutez ce job dans `.github/workflows/ci-cd.yml` :
       contents: write        # nécessaire pour envoyer le graphe à GitHub
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
           java-version: '25'
