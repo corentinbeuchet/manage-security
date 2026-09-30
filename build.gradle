@@ -19,6 +19,11 @@ repositories {
 	mavenCentral()
 }
 
+// Correctifs de sécurité signalés par Trivy, pas encore embarqués par Spring Boot :
+// à retirer dès que Spring Boot livre ces versions (Dependabot le signalera).
+ext['tomcat.version'] = '11.0.25'
+ext['jackson-bom.version'] = '3.1.6'
+
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
